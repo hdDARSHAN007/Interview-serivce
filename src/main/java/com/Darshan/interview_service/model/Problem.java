@@ -33,4 +33,23 @@ public class Problem {
 
     @Column(columnDefinition = "TEXT")
     private String sampleOutput;
+
+    @Column(columnDefinition = "TEXT")
+    private String starterCodeJava;
+
+    @Column(columnDefinition = "TEXT")
+    private String driverPrefixJava;
+
+    @Column(columnDefinition = "TEXT")
+    private String driverSuffixJava;
+
+
+    @Column(columnDefinition = "TEXT")
+    private String starterCodeCpp;
+
+    @Column(columnDefinition = "TEXT")
+    private String driverPrefixCpp;
+
+    @Column(columnDefinition = "TEXT")
+    private String driverSuffixCpp;
 }

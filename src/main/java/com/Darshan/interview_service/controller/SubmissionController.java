@@ -49,11 +49,20 @@ public class SubmissionController {
         for (int i = 0; i < testCases.size(); i++) {
             TestCase tc = testCases.get(i);
 //            JsonNode result = judge0Service.submitAndWait(req.getCode(), req.getLanguage(), tc.getInput());
+            String lang = req.getLanguage().toLowerCase();
             String codeToRun = req.getCode();
-            if (problem.getDriverCode() != null && !problem.getDriverCode().isBlank()) {
+
+            if (lang.equals("python") && problem.getDriverCode() != null && !problem.getDriverCode().isBlank()) {
                 codeToRun = req.getCode() + "\n\n" + problem.getDriverCode();
+            } else if (lang.equals("java") && problem.getDriverSuffixJava() != null && !problem.getDriverSuffixJava().isBlank()) {
+                String prefix = problem.getDriverPrefixJava() != null ? problem.getDriverPrefixJava() : "";
+                codeToRun = prefix + "\n" + req.getCode() + "\n\n" + problem.getDriverSuffixJava();
+            } else if (lang.equals("cpp") && problem.getDriverSuffixCpp() != null && !problem.getDriverSuffixCpp().isBlank()) {
+                String prefix = problem.getDriverPrefixCpp() != null ? problem.getDriverPrefixCpp() : "";
+                codeToRun = prefix + "\n" + req.getCode() + "\n\n" + problem.getDriverSuffixCpp();
             }
 
+//            JsonNode result = judge0Service.submitAndWait(codeToRun, req.getLanguage(), tc.getInput());
             JsonNode result = judge0Service.submitAndWait(codeToRun, req.getLanguage(), tc.getInput());
             String statusDescription = result.get("status").get("description").asText();
             String actualOutput = "";
@@ -107,6 +116,8 @@ public class SubmissionController {
     private String normalize(String s) {
         return s.trim().replaceAll("\\s+", "");
     }
+
+    @GetMapping("/analytics")
     public ResponseEntity<?> getAnalytics(Authentication authentication) {
         String email = authentication.getName();
         List<SubmissionRepository.TopicStats> stats = submissionRepository.getTopicStatsForUser(email);
