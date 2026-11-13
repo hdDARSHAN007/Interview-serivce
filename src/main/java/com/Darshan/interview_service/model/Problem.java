@@ -52,4 +52,29 @@ public class Problem {
 
     @Column(columnDefinition = "TEXT")
     private String driverSuffixCpp;
+
+    @Column(columnDefinition = "TEXT")
+    private String referenceSolutionPython;
+
+    @Column(columnDefinition = "TEXT")
+    private String referenceSolutionJava;
+
+    @Column(columnDefinition = "TEXT")
+    private String referenceSolutionCpp;
+
+    @Column(columnDefinition = "TEXT")
+    private String editorial;   // approach, proof, complexity, edge cases
+
+    @Column(columnDefinition = "TEXT")
+    private String hints;
+
+    public String solutionFor(String lang) {
+        if (lang == null) return null;
+        return switch (lang.toLowerCase()) {
+            case "python" -> referenceSolutionPython;
+            case "java"   -> referenceSolutionJava;
+            case "cpp", "c++" -> referenceSolutionCpp;
+            default -> null;
+        };
+    }// optional curated hints
 }

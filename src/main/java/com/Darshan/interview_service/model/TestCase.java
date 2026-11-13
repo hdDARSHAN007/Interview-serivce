@@ -20,5 +20,10 @@ public class TestCase {
     @Column(columnDefinition = "TEXT")
     private String expectedOutput;
 
-    private boolean isSample; // true = visible to student, false = hidden
+    private boolean isSample; // true = shown to students, false = hidden
+
+    // PENDING (waiting for the admin), APPROVED (used for grading) or REJECTED
+    private String status = "PENDING";
+
+    private String submittedBy; // email of the person who added it
 }

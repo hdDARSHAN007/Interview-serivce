@@ -4,10 +4,14 @@ import com.Darshan.interview_service.model.Submission;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+
 import java.util.List;
 
 public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     List<Submission> findByUserEmail(String userEmail);
+
+    boolean existsByUserEmailAndProblemIdAndVerdict(String userEmail, Long problemId, String verdict);
+    long countByUserEmailAndProblemIdAndVerdictNot(String userEmail, Long problemId, String verdict);
 
     @Query("SELECT s.topic AS topic, " +
             "COUNT(s) AS attempts, " +
@@ -23,9 +27,3 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
         Long getPassed();
     }
 }
-
-//What this does: TopicStats is a projection interface — Spring Data
-// JPA automatically maps the query's columns (topic, attempts, passed)
-// to matching getter methods, without you writing any manual mapping code.
-// This is a clean, idiomatic way to return aggregated data without needing
-// a full new entity

@@ -1,15 +1,15 @@
 package com.Darshan.interview_service.controller;
 
 import com.Darshan.interview_service.dto.ProblemRequest;
+import com.Darshan.interview_service.dto.TestCaseRequest;
 import com.Darshan.interview_service.model.Problem;
+import com.Darshan.interview_service.model.TestCase;
 import com.Darshan.interview_service.repository.ProblemRepository;
+import com.Darshan.interview_service.repository.TestCaseRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
-import com.Darshan.interview_service.dto.TestCaseRequest;
-import com.Darshan.interview_service.model.TestCase;
-import com.Darshan.interview_service.repository.TestCaseRepository;
-
 
 import java.util.List;
 
@@ -20,7 +20,10 @@ public class ProblemController {
     @Autowired
     private ProblemRepository problemRepository;
 
-    // Create a new problem
+    @Autowired
+    private TestCaseRepository testCaseRepository;
+
+    // Create a new problem (admin only, enforced in SecurityConfig)
     @PostMapping
     public ResponseEntity<?> createProblem(@RequestBody ProblemRequest req) {
         Problem problem = new Problem();
@@ -54,21 +57,48 @@ public class ProblemController {
         return ResponseEntity.ok(problemRepository.findByTopic(topic));
     }
 
-    @Autowired
-    private TestCaseRepository testCaseRepository;
-
+    // Anyone logged in can suggest a test case. It stays PENDING until the admin approves it.
+    // A test case added by the admin is approved immediately.
     @PostMapping("/{id}/testcases")
-    public ResponseEntity<?> addTestCase(@PathVariable Long id, @RequestBody TestCaseRequest req) {
+    public ResponseEntity<?> addTestCase(@PathVariable Long id,
+                                         @RequestBody TestCaseRequest req,
+                                         Authentication authentication) {
+        if (!problemRepository.existsById(id)) {
+            return ResponseEntity.notFound().build();
+        }
+        if (req.getInput() == null || req.getInput().isBlank()
+                || req.getExpectedOutput() == null || req.getExpectedOutput().isBlank()) {
+            return ResponseEntity.badRequest().body("Both the input and the expected output are required");
+        }
+
+        boolean admin = isAdmin(authentication);
+
         TestCase tc = new TestCase();
         tc.setProblemId(id);
         tc.setInput(req.getInput());
         tc.setExpectedOutput(req.getExpectedOutput());
-        tc.setSample(req.isSample());
+        tc.setSubmittedBy(authentication.getName());
+        tc.setSample(admin && req.isSample());
+        tc.setStatus(admin ? "APPROVED" : "PENDING");
         return ResponseEntity.ok(testCaseRepository.save(tc));
     }
 
+    // The admin sees every test case. Students only see approved sample cases,
+    // so the hidden ones stay hidden.
     @GetMapping("/{id}/testcases")
-    public ResponseEntity<?> getTestCases(@PathVariable Long id) {
-        return ResponseEntity.ok(testCaseRepository.findByProblemId(id));
+    public ResponseEntity<?> getTestCases(@PathVariable Long id, Authentication authentication) {
+        if (isAdmin(authentication)) {
+            return ResponseEntity.ok(testCaseRepository.findByProblemId(id));
+        }
+        List<TestCase> visible = testCaseRepository.findByProblemIdAndStatus(id, "APPROVED")
+                .stream()
+                .filter(TestCase::isSample)
+                .toList();
+        return ResponseEntity.ok(visible);
+    }
+
+    private boolean isAdmin(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
     }
 }

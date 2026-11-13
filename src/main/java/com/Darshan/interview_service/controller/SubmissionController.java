@@ -1,22 +1,21 @@
 package com.Darshan.interview_service.controller;
 
-import org.springframework.security.core.Authentication;
 import com.Darshan.interview_service.dto.SubmissionRequest;
 import com.Darshan.interview_service.model.Problem;
 import com.Darshan.interview_service.model.Submission;
+import com.Darshan.interview_service.model.TestCase;
 import com.Darshan.interview_service.repository.ProblemRepository;
 import com.Darshan.interview_service.repository.SubmissionRepository;
+import com.Darshan.interview_service.repository.TestCaseRepository;
 import com.Darshan.interview_service.service.Judge0Service;
-import tools.jackson.databind.JsonNode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
-import java.util.List;
-import com.Darshan.interview_service.model.TestCase;
-import com.Darshan.interview_service.repository.TestCaseRepository;
-import java.util.List;
+import tools.jackson.databind.JsonNode;
 
 import java.util.Base64;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/submissions")
@@ -32,9 +31,10 @@ public class SubmissionController {
         Problem problem = problemRepository.findById(req.getProblemId())
                 .orElseThrow(() -> new RuntimeException("Problem not found"));
 
-        List<TestCase> testCases = testCaseRepository.findByProblemId(problem.getId());
+        // Only test cases the admin has approved are used for grading
+        List<TestCase> testCases = testCaseRepository.findByProblemIdAndStatus(problem.getId(), "APPROVED");
 
-        // Fallback: if no test cases added yet, use the problem's original sample input/output
+        // Fallback: if there are no approved test cases, use the problem's own sample input/output
         if (testCases.isEmpty()) {
             TestCase fallback = new TestCase();
             fallback.setInput(problem.getSampleInput());
@@ -42,33 +42,31 @@ public class SubmissionController {
             testCases = List.of(fallback);
         }
 
+        // Join the student's code with the hidden driver code for the chosen language
+        String lang = req.getLanguage().toLowerCase();
+        String codeToRun = req.getCode();
+
+        if (lang.equals("python") && notBlank(problem.getDriverCode())) {
+            codeToRun = req.getCode() + "\n\n" + problem.getDriverCode();
+        } else if (lang.equals("java") && notBlank(problem.getDriverSuffixJava())) {
+            String prefix = problem.getDriverPrefixJava() != null ? problem.getDriverPrefixJava() : "";
+            codeToRun = prefix + "\n" + req.getCode() + "\n\n" + problem.getDriverSuffixJava();
+        } else if (lang.equals("cpp") && notBlank(problem.getDriverSuffixCpp())) {
+            String prefix = problem.getDriverPrefixCpp() != null ? problem.getDriverPrefixCpp() : "";
+            codeToRun = prefix + "\n" + req.getCode() + "\n\n" + problem.getDriverSuffixCpp();
+        }
+
         String finalVerdict = "ACCEPTED";
         String combinedOutput = "";
         int passedCount = 0;
+        boolean errorShown = false;
 
         for (int i = 0; i < testCases.size(); i++) {
             TestCase tc = testCases.get(i);
-//            JsonNode result = judge0Service.submitAndWait(req.getCode(), req.getLanguage(), tc.getInput());
-            String lang = req.getLanguage().toLowerCase();
-            String codeToRun = req.getCode();
 
-            if (lang.equals("python") && problem.getDriverCode() != null && !problem.getDriverCode().isBlank()) {
-                codeToRun = req.getCode() + "\n\n" + problem.getDriverCode();
-            } else if (lang.equals("java") && problem.getDriverSuffixJava() != null && !problem.getDriverSuffixJava().isBlank()) {
-                String prefix = problem.getDriverPrefixJava() != null ? problem.getDriverPrefixJava() : "";
-                codeToRun = prefix + "\n" + req.getCode() + "\n\n" + problem.getDriverSuffixJava();
-            } else if (lang.equals("cpp") && problem.getDriverSuffixCpp() != null && !problem.getDriverSuffixCpp().isBlank()) {
-                String prefix = problem.getDriverPrefixCpp() != null ? problem.getDriverPrefixCpp() : "";
-                codeToRun = prefix + "\n" + req.getCode() + "\n\n" + problem.getDriverSuffixCpp();
-            }
-
-//            JsonNode result = judge0Service.submitAndWait(codeToRun, req.getLanguage(), tc.getInput());
             JsonNode result = judge0Service.submitAndWait(codeToRun, req.getLanguage(), tc.getInput());
             String statusDescription = result.get("status").get("description").asText();
-            String actualOutput = "";
-            if (result.has("stdout") && !result.get("stdout").isNull()) {
-                actualOutput = new String(Base64.getDecoder().decode(result.get("stdout").asText()));
-            }
+            String actualOutput = decodeField(result, "stdout");
 
             boolean passed;
             String caseVerdict;
@@ -85,11 +83,28 @@ public class SubmissionController {
 
             combinedOutput += "Test " + (i + 1) + ": " + caseVerdict + " | Output: " + actualOutput.trim() + "\n";
 
+            // Show the real error message once (compile error, crash message, and so on)
+            if (!"Accepted".equals(statusDescription) && !errorShown) {
+                String errorText = firstNonBlank(
+                        decodeField(result, "compile_output"),
+                        decodeField(result, "stderr"),
+                        decodeField(result, "message"));
+                if (!errorText.isBlank()) {
+                    combinedOutput += "Error message:\n" + truncate(errorText.trim(), 800) + "\n";
+                    errorShown = true;
+                }
+            }
+
             if (passed) {
                 passedCount++;
             } else if (finalVerdict.equals("ACCEPTED")) {
-                // Record the first failure as the overall verdict
+                // The first failure becomes the overall verdict
                 finalVerdict = caseVerdict;
+            }
+
+            // A compile error will fail every test the same way, so stop early
+            if (caseVerdict.startsWith("COMPILATION")) {
+                break;
             }
         }
 
@@ -113,10 +128,6 @@ public class SubmissionController {
         return ResponseEntity.ok(submission);
     }
 
-    private String normalize(String s) {
-        return s.trim().replaceAll("\\s+", "");
-    }
-
     @GetMapping("/analytics")
     public ResponseEntity<?> getAnalytics(Authentication authentication) {
         String email = authentication.getName();
@@ -128,7 +139,38 @@ public class SubmissionController {
     public ResponseEntity<?> getUserSubmissions(@PathVariable String email) {
         return ResponseEntity.ok(submissionRepository.findByUserEmail(email));
     }
-//    private String normalize(String s) {
-//        return s.trim().replaceAll("\\s+", "");
-//    }
+
+    private String normalize(String s) {
+        return s.trim().replaceAll("\\s+", "");
+    }
+
+    private boolean notBlank(String s) {
+        return s != null && !s.isBlank();
+    }
+
+    // Judge0 sends text fields base64-encoded; this turns one back into plain text
+    private String decodeField(JsonNode result, String field) {
+        if (result.has(field) && !result.get(field).isNull()) {
+            String raw = result.get(field).asText();
+            try {
+                return new String(Base64.getMimeDecoder().decode(raw));
+            } catch (IllegalArgumentException e) {
+                return raw;
+            }
+        }
+        return "";
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String v : values) {
+            if (v != null && !v.isBlank()) {
+                return v;
+            }
+        }
+        return "";
+    }
+
+    private String truncate(String s, int max) {
+        return s.length() <= max ? s : s.substring(0, max) + "...";
+    }
 }
